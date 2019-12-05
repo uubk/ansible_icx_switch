@@ -1,0 +1,69 @@
+---
+  - name: Gather facts
+    icx_facts:
+      gather_subset: all
+
+  - name: Fail on invalid firmware release
+    when: icx_expected_firmware != "" and icx_expected_firmware != ansible_net_version
+    fail:
+      msg: Unexpected firmware revision on device!
+
+  - name: Configure management interface
+    icx_l3_interface:
+      name: ve 1
+      ipv4: "{{ icx_mgmt_ip }}"
+    when: icx_is_l3_switch
+
+  - name: Configure users
+    icx_user:
+      aggregate: "{{ icx_users }}"
+      purge: "yes"
+
+  - name: System config
+    icx_system:
+      hostname: "{{ icx_my_name }}"
+      domain_name: "{{ icx_domain_name }}"
+      name_servers:
+        - "{{ icx_nameserver }}"
+
+  - name: General setup
+    icx_config:
+      lines:
+        - enable acl-per-port-per-vlan
+        - global-stp
+        - aaa authentication web-server default local
+        - aaa authentication enable default local
+        - aaa authentication enable implicit-user
+        - aaa authentication login default local
+        - aaa authentication login privilege-mode
+        - jumbo
+        - enable aaa console
+        - logging console
+        - no telnet server
+        - ip multicast active
+        - ip multicast leave-wait-time 4
+        - clock summer-time
+        - web-management https
+        - ip access-list standard default
+        # The old switches need this, because ansible's parmiko ssh client
+        # ignores .ssh/config and therefore will not work with their old ssh
+        # server using public keys
+        # - ip ssh password-authentication no
+        #
+  - name: General setup (L3 specific)
+    icx_config:
+      lines:
+        - ip route 0.0.0.0/0 {{ icx_default_gw }} name default
+        - ip multicast disable-flooding
+        - clock timezone europe CEST
+        - no manager registrar
+        - manager disable
+    when: icx_is_l3_switch
+
+  - name: Assemble vlan membership list
+    set_fact:
+      icx_vlan_membership: "{{ icx_portconfig|vlan_membership(icx_lags) }}"
+
+  - name: Render combined vlan/lag/interface config
+    icx_config:
+      src: "{{ lookup('template', 'config.j2') }}"

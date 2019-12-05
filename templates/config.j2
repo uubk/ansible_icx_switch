@@ -1,0 +1,103 @@
+{% for item in icx_lags %}
+lag {{ item.name }} dynamic id {{ item.id }}
+ ports {{ item.ports }}
+ lacp-timeout short
+!
+{% endfor %}
+
+{% for item in icx_lags %}
+interface lag {{ item.id }}
+ port-name "{{ item.name }}-port"
+ loop-detection
+ stp-protect
+ broadcast limit 1000
+ unknown-unicast limit 10000
+{% if item.type == 'trust' %}
+ raguard trust
+ stp-bpdu-guard
+ dhcp snooping trust
+{% endif %}
+{% for item in item.extraconfig|default([]) %}
+ {{ item }}
+{% endfor %}
+!
+{% endfor %}
+
+vlan 1 name DEFAULT-VLAN by port
+ spanning-tree 802-1w
+ webauth
+  auth-mode username-password auth-methods local
+{% if not icx_is_l3_switch %}
+ management-vlan
+ default-gateway  {{ icx_default_gw }} 1
+{% else %}
+ router-interface ve 1
+{% endif %}
+!
+
+{% for item in icx_vlans %}
+vlan {{ item.id }} name {{ item.name}} by port
+{% if icx_vlan_membership[item.id]['tagged'] != [] %}
+ tagged {{ icx_vlan_membership[item.id]['tagged']|join(' ') }}
+{% endif %}
+{% if icx_vlan_membership[item.id]['untagged'] != [] %}
+ untagged {{ icx_vlan_membership[item.id]['untagged']|join(' ') }}
+{% endif %}
+ spanning-tree 802-1w
+ multicast fast-leave-v2
+!
+{% endfor %}
+
+ipv6 raguard policy client
+ipv6 raguard vlan 1 policy client
+{% for item in icx_vlans %}
+ipv6 raguard vlan {{ item.id }} policy client
+{% endfor %}
+!
+
+{% if icx_snmp_enable %}
+snmp-server community public ro "default"
+snmp-server enable vlan 1
+snmp-server host {{ icx_snmp_host }} version v3 priv user
+snmp-server group default v3 priv {{ icx_snmp_privs }}
+snmp-server user {{ icx_snmp_user }} default v3 encrypted auth md5 {{ icx_snmp_password }} priv encrypted des {{ icx_snmp_password }}
+!
+{% endif %}
+clock summer-time
+!
+ntp
+ disable serve
+{% for item in icx_ntp_servers %}
+ server {{ item }}
+{% endfor %}
+!
+
+{% for item in icx_portconfig %}
+interface ethernet {{ item.port }}
+ port-name "{{ item.name }}"
+ loop-detection
+{% if icx_is_l3_switch %}
+{% if 'link' not in item or item.link != "fibre" %}
+ eee
+{% endif %}
+ unknown-unicast limit 10000
+{% else %}
+ dual-mode
+ unknown-unicast limit
+{% endif %}
+ stp-protect
+ broadcast limit 1000
+{% if item.type == "trust" %}
+ raguard trust
+ stp-bpdu-guard
+ dhcp snooping trust
+{% endif %}
+{% for item in item.extraconfig|default([]) %}
+ {{ item }}
+{% endfor %}
+!
+{% endfor %}
+
+{% if not icx_is_l3_switch %}
+ip address {{ icx_mgmt_ip }} 255.255.255.0
+{% endif %}
